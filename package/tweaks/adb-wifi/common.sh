@@ -107,7 +107,7 @@ take_backup() {
         fi
         echo "adb.tcp ($A)" > "$T/source"
     else
-        # from the live state: only from off, with build.prop as Kia ships it
+        # from the live state: only from off, with build.prop as it ships
         is_on && { echo "ADB over Wi-Fi was turned on by something else and there's no backup of before"; rm -rf "$T"; return 1; }
         bp_has_lines && { echo "build.prop has ADB lines from something else - leaving it alone"; rm -rf "$T"; return 1; }
         if [ -f "$PROPS/$EN" ]; then cp "$PROPS/$EN" "$T/$EN.value"; else : > "$T/$EN.unset"; fi

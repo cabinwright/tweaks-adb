@@ -51,7 +51,7 @@ EN=persist.service.adb.tcp.enable
 PORT=persist.adb.tcp.port
 HIDE=system/etc/permissions/com.hkmc.software.engineermode.adb_hide.xml
 
-stock() {   # a head unit as Kia ships it: ADB off
+stock() {   # a head unit as it ships: ADB off
     rm -rf "$M"
     mkdir -p $M/system/etc/permissions $M/system/xbin $M/data/property $M/data/nemesis/backup $M/props $M/proc/net
     printf '# begin build properties\nro.build.product=CVEV.USA.0000.V015.012.260507\nro.product.model=daudio\n# end build properties\nro.protocol.version=14\n' > $M/system/build.prop

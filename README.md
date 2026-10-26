@@ -1,7 +1,7 @@
 # tweaks-adb
 
-A tweak pack for [kia-tweaks](https://github.com/hazptr/kia-tweaks) with one switch: **ADB over
-Wi-Fi**. NEMESIS package `tweaks.adb`; the tweak shows up in the **Tweaks** app, and kia-tweaks'
+A tweak pack for [Cabinwright tweaks](https://github.com/cabinwright/tweaks) with one switch: **ADB over
+Wi-Fi**. NEMESIS package `tweaks.adb`; the tweak shows up in the **Tweaks** app, and its
 `tweaksd` runs it. Written for the 2023 Kia EV6 (Gen5W, firmware
 `CVEV.USA.0000.V015.012.260507`) and limited to that firmware.
 
@@ -16,7 +16,8 @@ setup and backup, so a car running `adb.tcp` can move to it without ADB dropping
 |---|---|---|
 | ADB over Wi-Fi (`adb-wifi`) | oneshot, system | A computer on the car's Wi-Fi can use ADB on port 5555. |
 
-Needs kia-tweaks 1.2 or newer (tweak pack support in `tweaksd`).
+Needs cabinwright.tweaks 1.4 or newer (or kia.tweaks 1.2 or newer, its name before 1.4). The
+switch from kia.tweaks to cabinwright.tweaks leaves the tweak as it is.
 
 ## What it changes
 
@@ -81,7 +82,7 @@ These findings come from the car's init scripts, `/sbin/adbd`, and the Engineeri
 | Path | What |
 |---|---|
 | `package/NEMESIS.data` | `id=tweaks.adb`, no apps, no services, no install hooks |
-| `package/tweaks/adb-wifi/` | `tweak.conf` and the scripts (kia-tweaks' format) |
+| `package/tweaks/adb-wifi/` | `tweak.conf` and the scripts (the Tweaks format) |
 | `package/lib/adb-adopt.sh` | copies `adb.tcp`'s backup into this pack's backup (migration step) |
 | `tests/host-test.sh` | runs the tweak against a mock head unit on a computer |
 | `tests/detach-test.sh` | runs `adb.tcp`'s own uninstall hook against a mock to check the detach |

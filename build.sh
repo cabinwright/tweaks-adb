@@ -1,14 +1,14 @@
 #!/bin/sh
-# Builds the tweaks.adb NEMESIS package (a tweak pack for kia-tweaks): dist/tweaks.adb.zip from
+# Builds the tweaks.adb NEMESIS package (a tweak pack for Cabinwright tweaks): dist/tweaks.adb.zip from
 # package/ (NEMESIS.data, tweaks/adb-wifi/, lib/). Needs only sh and zip.
-# Install over ADB (kia.tweaks 1.2 or newer must be installed; its tweaksd runs the tweak):
+# Install over ADB (cabinwright.tweaks 1.4 or newer must be installed; its tweaksd runs the tweak):
 #   adb push dist/tweaks.adb.zip /data/local/tmp/
 #   adb shell "nemesis install [--update] /data/local/tmp/tweaks.adb.zip"
 set -e
 ROOT=$(cd "$(dirname "$0")" && pwd)
 P=$ROOT/package
 
-# the head unit's shell (mksh) has no printf, sed, awk, head, tail or tr
+# The head unit's shell (mksh) has no printf, sed, awk, head, tail or tr
 if grep -rnE '(^[[:space:]]*|[|;&(][[:space:]]*|\$\([[:space:]]*)(printf|sed|awk|head|tail|tr)[[:space:]]' --include='*.sh' "$P" | grep -vE ':[0-9]+:[[:space:]]*#'; then
     echo "build.sh: a command the head unit doesn't have, in the scripts above" >&2
     exit 1

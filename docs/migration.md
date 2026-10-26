@@ -42,7 +42,7 @@ window is why the steps below detach adb.tcp instead.
 ## Steps
 
 **0. Prerequisites.**
-- kia.tweaks 1.2 or newer installed and running.
+- cabinwright.tweaks 1.4 or newer (or kia.tweaks 1.2 or newer, its earlier name) installed and running.
 - Build `dist/tweaks.adb.zip`.
 - Keep **ADB TCP and wireless projection together** (tweaks-projection's `adb-tcp-hotspot`) on.
   The switch has to stay 1 (see the README), so `set_adb_ip` still runs at every start.
@@ -57,7 +57,7 @@ adb shell "nemesis install /data/local/tmp/tweaks.adb.zip"
 **2. Let the Tweaks app record the switch.**
 - Open the Tweaks app once. It records a system tweak's switch from its first reported state, so
   **ADB over Wi-Fi** shows on: "ADB over Wi-Fi is on".
-- Check `/data/nemesis/kia-tweaks/state.json`: `adb-wifi` should show `"want":"on","state":"on"`.
+- Check `/data/nemesis/cabinwright/tweaks/state.json`: `adb-wifi` should show `"want":"on","state":"on"`.
 - tweaksd runs nothing, because the tweak is already on.
 - Even if `enable.sh` ran, it would do nothing to ADB:
   - it only copies adb.tcp's backup and prints "already on";
