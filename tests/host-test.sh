@@ -169,4 +169,9 @@ stock; restart; printf 'persist.service.adb.tcp.enable=1\n' >> $M/system/build.p
 run enable fail; absent data/nemesis/backup/tweaks.adb/adb-wifi
 stock; restart; chmod 000 $M/data/property; expect "error can't read the saved settings"; chmod 700 $M/data/property
 
+echo "F. on again after off, with adb.tcp's old backup still there"
+adbtcp_car; run disable; expect "off ADB stays on until the next restart"; restart
+run enable; expect "on ADB over Wi-Fi is on"
+run disable; is_stock_files
+
 [ $FAILS = 0 ] && echo "all passed ($SH)" || { echo "$FAILS failed ($SH)"; exit 1; }
