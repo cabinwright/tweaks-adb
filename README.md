@@ -1,8 +1,8 @@
 # tweaks-adb
 
-A tweak pack for [Cabinwright tweaks](https://github.com/cabinwright/tweaks) with one switch: **ADB over
-Wi-Fi**. NEMESIS package `tweaks.adb`; the tweak shows up in the **Tweaks** app, and its
-`tweaksd` runs it. Written for the 2023 Kia EV6 (Gen5W, firmware
+A tweak pack for [Cabinwright](https://github.com/cabinwright/store) with one switch: **ADB over
+Wi-Fi**. Package `tweaks.adb`, installed from the Cabinwright store; the tweak shows up in the
+**Tweaks** app, and the store's runner runs it. Written for the 2023 Kia EV6 (Gen5W, firmware
 `CVEV.USA.0000.V015.012.260507`) and limited to that firmware.
 
 It replaces the NEMESIS community package `adb.tcp` ("TCP ADB"). It takes over that package's
@@ -14,41 +14,42 @@ setup and backup, so a car running `adb.tcp` can move to it without ADB dropping
 
 | Tweak | Kind | What it does |
 |---|---|---|
-| ADB over Wi-Fi (`adb-wifi`) | oneshot, system | A computer on the car's Wi-Fi can use ADB on port 5555. |
+| ADB over Wi-Fi (`adb-wifi`) | oneshot, changes system files | A computer on the car's Wi-Fi can use ADB on port 5555. |
 
-Needs cabinwright.tweaks 1.4 or newer (or kia.tweaks 1.2 or newer, its name before 1.4). The
-switch from kia.tweaks to cabinwright.tweaks leaves the tweak as it is.
+Needs cabinwright.store 1.0 or newer.
 
 ## What it changes
 
-It works the same way as Engineering Mode's **ADB TCP** switch, so the two always agree:
+It works the same way as Engineering Mode's **ADB TCP** switch, so the two always agree. Every
+change is declared in `tweak.conf` (the `need=` lines, with the reasons the store shows before
+you agree) and made through the store's `kt`; the store's runner records what was there before
+and puts it back when the tweak is turned off.
 
 - **On**:
   - sets `persist.adb.tcp.port=5555` if it has no value;
-  - removes `/system/etc/permissions/com.hkmc.software.engineermode.adb_hide.xml`, which
-    shows Engineering Mode's ADB switch from the next start on, so ADB can be turned back on
-    from the screen;
-  - then sets `persist.service.adb.tcp.enable=1` with `setprop`, as the switch does. This
-    starts ADB at once.
+  - replaces `/system/etc/permissions/com.hkmc.software.engineermode.adb_hide.xml` with a copy
+    that declares no feature, which shows Engineering Mode's ADB switch from the next start on,
+    so ADB can be turned back on from the screen;
+  - then sets `persist.service.adb.tcp.enable=1`, as the switch does (Engineering Mode's
+    `MiscService.setSystem` call only sets this prop). This starts ADB at once.
 
   If that prop is already 1, it isn't set again: setting it again would restart `adbd` and
-  drop every ADB session. A computer would have to reconnect.
-- **Off**:
-  - puts back exactly what was there before;
-  - sets `persist.service.adb.tcp.enable` to 0 with `setprop`, so Engineering Mode shows off
-    at once, then restores its saved file as the backup has it;
-  - doesn't stop `adbd`: the running ADB keeps working until the next start. Engineering
-    Mode's own switch stops `adbd` right away; this tweak doesn't, so turning it off from the
-    car can't cut off a session in use.
+  drop every ADB session. A computer would have to reconnect. A switch turned on in Engineering
+  Mode is kept as it is, and turning the tweak off sets it to 0, as Engineering Mode does.
+- **Off**: the runner puts back exactly what was there before: the feature file, the port, and
+  the switch (unset, or 0), so Engineering Mode shows off at once. It doesn't stop `adbd`: the
+  running ADB keeps working until the next start. Engineering Mode's own switch stops `adbd`
+  right away; this tweak doesn't, so turning it off from the car can't cut off a session in use.
 - **Status** reads `persist.service.adb.tcp.enable`, the value Engineering Mode's screen reads,
-  and its saved file in `/data/property`. A change made in Engineering Mode shows up in the
-  Tweaks app. `/proc/net/tcp` tells whether ADB is listening right now, so the status says when
-  a restart is still needed.
+  so a change made in Engineering Mode shows up in the Tweaks app. `/proc/net/tcp` tells whether
+  ADB is listening right now, so the status says when a restart is still needed.
 
-The backup is in `/data/nemesis/backup/tweaks.adb/adb-wifi`. When the car came from `adb.tcp`,
-the backup is made from `adb.tcp`'s own (`/data/nemesis/backup/adb.tcp`). Turning off then also
-puts back `/system/build.prop` byte for byte; `adb.tcp` had added three lines to it. If something
-else changed those files, the tweak leaves them alone and reports an error.
+When the car came from `adb.tcp`, turning on takes over what that package set up (`kt adopt`),
+with the originals from its backup (`/data/nemesis/backup/adb.tcp`): turning off then also puts
+back `/system/build.prop` byte for byte (`adb.tcp` added three lines to it), its
+`adb_hide.xml`, and the switch as it was before `adb.tcp`. The port that HMG Leafia Plus set is
+taken over the same way. If something else changed those files, the tweak leaves them alone and
+reports an error.
 
 Nothing reboots.
 
@@ -82,9 +83,11 @@ These findings come from the car's init scripts, `/sbin/adbd`, and the Engineeri
 | Path | What |
 |---|---|
 | `package/NEMESIS.data` | `id=tweaks.adb`, no apps, no services, no install hooks |
-| `package/tweaks/adb-wifi/` | `tweak.conf` and the scripts (the Tweaks format) |
-| `package/lib/adb-adopt.sh` | copies `adb.tcp`'s backup into this pack's backup (migration step) |
-| `tests/host-test.sh` | runs the tweak against a mock head unit on a computer |
+| `package/tweaks/adb-wifi/` | `tweak.conf`, the scripts, and the feature file that shows the switch |
+| `package/lib/adb-adopt.sh` | taking over what `adb.tcp` and Leafia's package set up |
+| `tools/check-tweaks.sh` | checks `tweak.conf` (keys, needs, `disable.sh` where needed) |
+| `tests/host-test.sh` | runs the tweak against a mock head unit on a computer, as the runner does |
+| `tests/fake-kt.sh` | the stand-in `kt` and runner journal the host test uses |
 | `tests/detach-test.sh` | runs `adb.tcp`'s own uninstall hook against a mock to check the detach |
 
 ## Build and test
@@ -94,6 +97,9 @@ sh build.sh                          # -> dist/tweaks.adb.zip (needs zip)
 sh tests/host-test.sh                # KT_SH=mksh|dash|bash picks the shell for the scripts
 sh tests/detach-test.sh <adb.tcp>    # a copy of /data/nemesis/apps/adb.tcp (not included)
 ```
+
+CI also lints with the Cabinwright menu repo's `api/tools/lint.sh` (ShellCheck), pinned at
+`v1.0`.
 
 ## License
 

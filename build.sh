@@ -1,9 +1,7 @@
 #!/bin/sh
-# Builds the tweaks.adb NEMESIS package (a tweak pack for Cabinwright tweaks): dist/tweaks.adb.zip from
-# package/ (NEMESIS.data, tweaks/adb-wifi/, lib/). Needs only sh and zip.
-# Install over ADB (cabinwright.tweaks 1.4 or newer must be installed; its tweaksd runs the tweak):
-#   adb push dist/tweaks.adb.zip /data/local/tmp/
-#   adb shell "nemesis install [--update] /data/local/tmp/tweaks.adb.zip"
+# Builds the tweaks.adb package (a tweak pack, installed from the Cabinwright store, whose runner
+# runs its tweak): dist/tweaks.adb.zip from package/ (NEMESIS.data, tweaks/adb-wifi/, lib/).
+# Needs only sh and zip.
 set -e
 ROOT=$(cd "$(dirname "$0")" && pwd)
 P=$ROOT/package
@@ -13,7 +11,8 @@ if grep -rnE '(^[[:space:]]*|[|;&(][[:space:]]*|\$\([[:space:]]*)(printf|sed|awk
     echo "build.sh: a command the head unit doesn't have, in the scripts above" >&2
     exit 1
 fi
-for f in $(find "$P" -name '*.sh'); do sh -n "$f" || { echo "build.sh: syntax error in $f" >&2; exit 1; }; done
+sh "$ROOT/tools/check-tweaks.sh" "$P" || exit 1
+find "$P" -name '*.sh' | while read -r f; do sh -n "$f" || { echo "build.sh: syntax error in $f" >&2; exit 1; }; done || exit 1
 # NEMESIS runs uninstall hooks on every update too: a tweak pack has none
 if grep -qE '^(preinstall|postinstall|preuninstall|postuninstall)=' "$P/NEMESIS.data"; then
     echo "build.sh: NEMESIS.data must not have install hooks" >&2; exit 1

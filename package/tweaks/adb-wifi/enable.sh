@@ -1,38 +1,28 @@
 #!/system/bin/sh
-# Turn ADB over Wi-Fi on (see common.sh). Backs up first, never reboots, never restarts a
-# running adbd: persist.service.adb.tcp.enable is set with setprop only when it isn't 1 yet
-# (setprop with the same value would fire init's trigger again and restart adbd).
-D=${0%/*}
-. $D/common.sh
-if is_on && has_port && [ ! -f "$HIDE" ]; then
-    # already on, e.g. as adb.tcp left it: only take over its backup (writes nothing else)
-    take_backup >/dev/null 2>&1
-    echo "already on"; exit 0
-fi
-take_backup || fail "couldn't back up the current state"
+# Turn ADB over Wi-Fi on (see common.sh). What adb.tcp or HMG Leafia Plus already set up is
+# taken over (lib/adb-adopt.sh); the rest goes through kt. Never reboots and never restarts a
+# running adbd: persist.service.adb.tcp.enable is set only when it isn't 1 yet (setting it again
+# would fire init's trigger and restart adbd).
+D=${TWEAK_DIR:-${0%/*}}
+. "$D/common.sh"
+. "$D/../../lib/adb-adopt.sh"
+adbtcp_plan || fail "nothing changed"
+leafia_plan
 # 1. the port, read by adbd when it starts
-if [ -z "$(boot_value $PORT)" ]; then
-    setprop $PORT 5555
-    [ "$(boot_value $PORT)" = 5555 ] || put_prop_file $PORT 5555 || fail "setting $PORT"
-fi
+[ -n "$(getprop $PORT)" ] || step prop $PORT 5555
 # 2. Engineering Mode's ADB switch (shows after the next start)
-if [ -f "$HIDE" ]; then
-    $NEMESIS remount rw >/dev/null 2>&1 || fail "remount /system rw"
-    rm -f "$HIDE" || fail "removing $HIDE"
-    sync
-    $NEMESIS remount ro >/dev/null 2>&1
-fi
-# 3. the switch itself, last
+is_hidden && step put $HIDE "$D/adb_hide.shown.xml"
+# 3. the switch itself, last. Already 1 (from Engineering Mode): kept as it is, and turning the
+# tweak off sets it to 0, as Engineering Mode's own switch does
 if ! is_on; then
-    if [ "$(getprop $EN)" = 1 ]; then
-        # already 1 for now (its file was removed): save it without firing init's trigger
-        put_prop_file $EN 1 || fail "saving $EN"
-    else
-        # starts adbd on port 5555 at once
-        setprop $EN 1
-        is_on || put_prop_file $EN 1 || fail "saving $EN"
-    fi
+    step prop $EN 1
+else
+    case "$STEPS" in *"propadopt:$EN:"*) ;; *) step propadopt $EN 0 ;; esac
 fi
-is_on && has_port || fail "still off after the change"
-echo "ADB over Wi-Fi turned on"
+run_steps || fail "stopped part way - turn it off to put back what was changed"
+if ! is_on || ! has_port; then fail "still off after the change"; fi
+case "$STEPS" in
+    *" put:"* | *" prop:"*) echo "ADB over Wi-Fi turned on" ;;
+    *) echo "ADB over Wi-Fi was already on: taken over, nothing changed" ;;
+esac
 exit 0

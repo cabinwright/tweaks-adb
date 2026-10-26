@@ -26,7 +26,33 @@ jobs:
           fi
 
       - name: Shell syntax
-        run: for f in $(find package tests -name '*.sh') build.sh; do sh -n "$f" || exit 1; done
+        run: for f in $(find package tests tools -name '*.sh') build.sh; do sh -n "$f" || exit 1; done
+
+      - name: Tweaks
+        run: sh tools/check-tweaks.sh package
+
+      # the pinned lint tools and settings of the Cabinwright repos
+      - uses: actions/checkout@v4
+        with:
+          repository: cabinwright/menu
+          ref: v1.0
+          path: menu
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/cabinwright-tools
+          key: cabinwright-tools-${{ runner.os }}-${{ hashFiles('menu/api/tools/fetch-tools.sh') }}
+
+      # ShellCheck, the tweak's scripts as the car's mksh
+      - name: Lint
+        run: |
+          sh menu/api/tools/fetch-tools.sh
+          sh menu/api/tools/lint.sh .
 
       # The head unit's shell is mksh; dash is the closest stand-in that is always there
       - name: mksh
@@ -54,8 +80,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > "$RUNNER_TEMP/notes.md" <<NOTES
-          NEMESIS package \`tweaks.adb\` $VERSION, a tweak pack for Cabinwright tweaks (needs cabinwright.tweaks 1.4 or newer):
-          install \`tweaks.adb-v$VERSION.zip\` with NEMESIS (\`nemesis install --update <zip>\` over ADB).
+          \`tweaks.adb\` $VERSION, a tweak pack for Cabinwright: install it from the Cabinwright store
+          (cabinwright.store 1.0 or newer), whose runner runs its tweak.
           Moving from the community package adb.tcp ("TCP ADB"): see docs/migration.md.
           ADB over Wi-Fi has no authentication on this firmware: anyone who joins the car's Wi-Fi can control the head unit.
           NOTES

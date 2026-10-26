@@ -22,5 +22,5 @@ tweaks-projection's migration (`/data/nemesis/backup/leafia-detached/wireless.ca
 
 ## Cabinwright tweaks (MIT)
 
-https://github.com/cabinwright/tweaks, Copyright (c) 2026 hazptr. The tweak format, and the
-layout of `build.sh` and the host test, follow it and tweaks-projection.
+https://github.com/cabinwright/tweaks, Copyright (c) 2026 hazptr. The layout of
+`build.sh` and the host test follow it and tweaks-projection.

@@ -6,7 +6,7 @@ that connection, and losing it means recovering with a USB stick. No step below 
 `/system`, runs `setprop` or restarts `adbd`. Commands run over ADB (`adb shell "..."`);
 `nemesis root -c` runs as root.
 
-## What the car has now (read on 2026-10-25)
+## What adb.tcp leaves on the car
 
 | What | On the car | Comes from |
 |---|---|---|
@@ -18,7 +18,7 @@ that connection, and losing it means recovering with a USB stick. No step below 
 | `adbd` | running, listening on 0.0.0.0:5555 | init, on the prop above |
 | `/data/nemesis/backup/adb.tcp` | `saved`, `build.prop`, `bp.*.absent` (3), `gp.*.unset` (2), `adb_hide.xml` | adb.tcp |
 
-The pack's `status.sh`, run read-only on the car as root, prints `on ADB over Wi-Fi is on`.
+The pack's `status.sh` reports this as `on ADB over Wi-Fi is on`.
 
 ## What uninstalling adb.tcp normally does (don't)
 
@@ -35,50 +35,33 @@ backup in place, that:
 
 The restart at step 6 drops the ADB session. `adbd` comes back on 5555 only because
 `persist.adb.tcp.port` is still 5555, and the computer has to reconnect. After the next start
-the switch is unset, nothing starts `adbd`, and ADB is gone. If `tweaks.adb` is on by then,
-tweaksd notices within 5 minutes and turns it on again, but that relies on tweaksd. That
-window is why the steps below detach adb.tcp instead.
+the switch is unset, nothing starts `adbd`, and ADB is gone. Once the pack has taken over, the
+store would also report the tweak as "Changed by something else". That is why the steps below
+detach adb.tcp instead.
 
 ## Steps
 
 **0. Prerequisites.**
-- cabinwright.tweaks 1.4 or newer (or kia.tweaks 1.2 or newer, its earlier name) installed and running.
-- Build `dist/tweaks.adb.zip`.
+- cabinwright.store 1.0 or newer installed.
 - Keep **ADB TCP and wireless projection together** (tweaks-projection's `adb-tcp-hotspot`) on.
   The switch has to stay 1 (see the README), so `set_adb_ip` still runs at every start.
 
-**1. Install the pack.** It has no install hooks, so nothing changes.
+**1. Install the pack** from the store. It has no install hooks, so nothing changes. The store
+lists the tweak's needs before you agree.
 
-```sh
-adb push dist/tweaks.adb.zip /data/local/tmp/
-adb shell "nemesis install /data/local/tmp/tweaks.adb.zip"
-```
+**2. Take over adb.tcp's setup.** In the Tweaks app, turn on **ADB over Wi-Fi**. It finds
+adb.tcp's changes and takes them over: the store's runner records adb.tcp's snapshot of
+`build.prop`, its copy of `adb_hide.xml` (each checked against the stock md5) and the switch's
+value before adb.tcp as the originals. It says "ADB over Wi-Fi was already on: taken over,
+nothing changed". It never sets the switch while it is 1 already, so `adbd` isn't restarted; the
+host test checks this ("no setprop", "adbd not restarted").
 
-**2. Let the Tweaks app record the switch.**
-- Open the Tweaks app once. It records a system tweak's switch from its first reported state, so
-  **ADB over Wi-Fi** shows on: "ADB over Wi-Fi is on".
-- Check `/data/nemesis/cabinwright/tweaks/state.json`: `adb-wifi` should show `"want":"on","state":"on"`.
-- tweaksd runs nothing, because the tweak is already on.
-- Even if `enable.sh` ran, it would do nothing to ADB:
-  - it only copies adb.tcp's backup and prints "already on";
-  - it never sets the switch while it is 1 already. The host test checks this ("no setprop",
-    "adbd not restarted").
+It refuses, changing nothing, if build.prop without adb.tcp's three lines isn't adb.tcp's
+snapshot byte for byte.
 
-If the status is anything else, stop here and uninstall the pack: nothing was changed.
-
-**3. Take over adb.tcp's backup.** This writes only `/data/nemesis/backup/tweaks.adb`.
-
-```sh
-adb shell "nemesis root -c 'sh /data/nemesis/apps/tweaks.adb/lib/adb-adopt.sh'"
-# expect: taken over into /data/nemesis/backup/tweaks.adb/adb-wifi:
-#   adb_hide.xml  build.prop.stock  complete  persist.adb.tcp.port.unset
-#   persist.service.adb.tcp.enable.unset  source
-```
-
-It refuses if build.prop without adb.tcp's three lines isn't adb.tcp's snapshot byte for byte.
-
-**4. Detach adb.tcp without its undo.** Move away the marker its restore checks first, then
-uninstall it:
+**3. Detach adb.tcp without its undo.** Move away the marker its restore checks first, then
+uninstall it. These are root commands over ADB, which the store's lockdown keeps to NEMESIS
+Manager: turn **Lockdown** off in the store's settings for this step, and back on afterwards.
 
 ```sh
 adb shell "nemesis root -c 'mv /data/nemesis/backup/adb.tcp/saved /data/nemesis/backup/adb.tcp/saved.detached'"
@@ -91,10 +74,10 @@ Check:
 - `md5 /system/build.prop` is still `ef2487…`.
 - `getprop persist.service.adb.tcp.enable` is still 1.
 - The tweak still says "on ADB over Wi-Fi is on".
-- adb.tcp's backup folder stays, renamed marker and all. It can be deleted later, since step 3
-  copied it.
+- adb.tcp's backup folder stays, renamed marker and all. The runner keeps its own copies of the
+  originals, so it can be deleted.
 
-### Why step 4 changes nothing and ADB stays up
+### Why step 3 changes nothing and ADB stays up
 
 **adb.tcp's hook** (`scripts/preun.sh`, md5 `fe8b83275b0eb8108366ee1071cc1d3b`, with
 `scripts/common.sh` md5 `cc7f7122b6b29b152e6d23fc3c15096c`, as installed on the car) does this,
@@ -130,23 +113,23 @@ It passes: exit 1, no file changed but the log, no `setprop`, remount or reboot.
 A preuninstall hook that exits non-zero doesn't stop the uninstall. Only install checks its hook
 (`preinstall failed rc=%d`). Nothing in the uninstall touches `adbd` or props.
 
-**5. Done.**
+**4. Done.**
 - `tweaks.adb` now owns ADB over Wi-Fi.
 - Engineering Mode's ADB TCP switch and the Tweaks app show the same state.
 - No restart is needed.
 
 ## Rollback
 
-- **Before step 4:** `adb shell "nemesis uninstall tweaks.adb"`. The pack has no hooks and never
-  ran a script, so adb.tcp's install is exactly as before.
-  `rm -rf /data/nemesis/backup/tweaks.adb` if you like.
-- **After step 4, keeping ADB:** nothing to do.
+- **Before step 2:** uninstall the pack from the store. It never ran a script, so adb.tcp's
+  install is exactly as before.
+- **After step 2, before step 3:** turning the tweak off, or removing the pack, puts back the
+  state from before adb.tcp (and ADB stops at the next start). To keep adb.tcp's setup, leave
+  the tweak on.
+- **After step 3, keeping ADB:** nothing to do.
 - **To go back to stock:**
-  1. Turn **ADB over Wi-Fi** off in the Tweaks app. It puts build.prop, adb_hide.xml and both
-     props back as they were before adb.tcp, and ADB keeps working until the next start.
+  1. Turn **ADB over Wi-Fi** off in the Tweaks app. The runner puts build.prop, adb_hide.xml
+     and both props back as they were before adb.tcp, and ADB keeps working until the next start.
   2. Restart.
-- **Without the app:**
-  `nemesis root -c 'sh /data/nemesis/apps/tweaks.adb/tweaks/adb-wifi/disable.sh'`.
 - **If ADB is ever lost:**
   - turn on Engineering Mode > Module Info > page 3 (tap a corner until the ADB menu shows) >
     ADB TCP. That switch is visible while the tweak is on.

@@ -1,12 +1,15 @@
 #!/bin/sh
 # Host test: runs the adb-wifi tweak's scripts against a mock head unit (build.prop, the
-# adb_hide feature file, /data/property, /proc/net/tcp) with stubs for getprop/setprop, md5 and
-# nemesis. setprop is logged; setting persist.service.adb.tcp.enable to 1 plays init's trigger
+# adb_hide feature file, /data/property, /proc/net/tcp) the way the store's runner runs them:
+# with $TWEAK_ID, $TWEAK_DIR and $TWEAK_DATA set, /system read-only to them, and a stand-in kt
+# (tests/fake-kt.sh) that checks every call against the tweak's need= lines and keeps the
+# runner's journal. Turning the tweak off is that journal replayed. setprop is only reachable
+# through kt and is logged; setting persist.service.adb.tcp.enable to 1 plays init's trigger
 # (adbd restarts and listens on 5555), so the test can tell when a running ADB would drop.
-# Covers: on/off from a stock car in both orders, taking over adb.tcp's setup and backup,
-# exact restores, Engineering Mode's switch, and refusing states it doesn't know.
+# Covers: on/off from a stock car, taking over adb.tcp's and Leafia's setup, exact restores,
+# Engineering Mode's switch, and refusing states it doesn't know.
 #
-# usage: tests/host-test.sh      (KT_SH picks the shell for the scripts; default bash, or mksh)
+# usage: tests/host-test.sh      (KT_SH picks the shell for the scripts; default mksh, or bash)
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 T=$HERE/package/tweaks/adb-wifi
@@ -16,18 +19,20 @@ trap 'chmod -R u+w "$W"; rm -rf "$W"' EXIT
 FAILS=0
 
 REAL_MD5=$(command -v md5sum || command -v md5)
-mkdir -p "$W/stubs"
-cat > "$W/stubs/md5" <<EOF
+md5of() { case "$REAL_MD5" in *md5sum) md5sum "$1" | cut -d' ' -f1 ;; *) "$REAL_MD5" -q "$1" ;; esac; }
+mkdir -p "$W/stubs" "$W/priv"
+cat >"$W/stubs/md5" <<EOF
 #!/bin/sh
 [ -f "\$1" ] || { echo "could not open \$1" >&2; exit 1; }
 case "$REAL_MD5" in *md5sum) s=\$($REAL_MD5 "\$1" | cut -d' ' -f1) ;; *) s=\$($REAL_MD5 -q "\$1") ;; esac
 echo "\$s  \$1"
 EOF
-cat > "$W/stubs/getprop" <<'EOF'
+cat >"$W/stubs/getprop" <<'EOF'
 #!/bin/sh
 cat "$KT_TEST_ROOT/props/$1" 2>/dev/null
 EOF
-cat > "$W/stubs/setprop" <<'EOF'
+# only kt has setprop
+cat >"$W/priv/setprop" <<'EOF'
 #!/bin/sh
 M=$KT_TEST_ROOT
 echo "$1=$2" >> "$M/setprop.log"
@@ -40,138 +45,255 @@ if [ "$1" = persist.service.adb.tcp.enable ] && [ "$2" = 1 ]; then
 fi
 exit 0
 EOF
-cat > "$W/stubs/listen" <<'EOF'
+cat >"$W/priv/listen" <<'EOF'
 #!/bin/sh
 echo "   2: 00000000:15B3 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 954 1 00000000 100 0 0 10 0" > "$KT_TEST_ROOT/proc/net/tcp"
 EOF
-chmod 755 "$W"/stubs/*
-export KT_TEST_ROOT=$W/root KT_TEST_PATH=$W/stubs:/usr/bin:/bin:/usr/sbin:/sbin
+cp "$HERE/tests/fake-kt.sh" "$W/stubs/kt"
+chmod 755 "$W"/stubs/* "$W"/priv/*
+export KT_TEST_ROOT="$W/root" KT_JOURNAL="$W/journal" KT_LOG="$W/kt.log" KT_TEST_SETPROP="$W/priv/setprop"
+export PATH="$W/stubs:/usr/bin:/bin:/usr/sbin:/sbin"
 M=$KT_TEST_ROOT
 EN=persist.service.adb.tcp.enable
 PORT=persist.adb.tcp.port
 HIDE=system/etc/permissions/com.hkmc.software.engineermode.adb_hide.xml
+# the stock files: build.prop and adb_hide.xml as this firmware ships them have these md5s
+# (common.sh); the mock uses stand-ins, so the tweak.conf and common.sh md5s are swapped for theirs
+STOCK_BP='# begin build properties\nro.build.product=CVEV.USA.0000.V015.012.260507\nro.product.model=daudio\n# end build properties\nro.protocol.version=14\n'
+STOCK_HIDE='<permissions>\n        <feature name="com.hkmc.software.engineermode.adb_hide" />\n</permissions>\n'
+printf '%b' "$STOCK_BP" >"$W/stock.bp"
+printf '%b' "$STOCK_HIDE" >"$W/stock.hide"
+# the pack, with the mock's stock md5s in place of the car's
+P=$W/pack
+cp -R "$HERE/package/." "$P/"
+T=$P/tweaks/adb-wifi
+for f in "$T/tweak.conf" "$T/common.sh" "$P/lib/adb-adopt.sh"; do
+    sed -e "s/30e9666d146efe83697f155574d50d30/$(md5of "$W/stock.bp")/" \
+        -e "s/bb94dd63efd6d3494834e649653f795f/$(md5of "$W/stock.hide")/" "$f" >"$f.t"
+    mv "$f.t" "$f"
+done
 
-stock() {   # a head unit as it ships: ADB off
-    rm -rf "$M"
-    mkdir -p $M/system/etc/permissions $M/system/xbin $M/data/property $M/data/nemesis/backup $M/props $M/proc/net
-    printf '# begin build properties\nro.build.product=CVEV.USA.0000.V015.012.260507\nro.product.model=daudio\n# end build properties\nro.protocol.version=14\n' > $M/system/build.prop
-    printf '<permissions>\n        <feature name="com.hkmc.software.engineermode.adb_hide" />\n</permissions>\n' > $M/$HIDE
-    printf '#!/bin/sh\nexit 0\n' > $M/system/xbin/nemesis; chmod 755 $M/system/xbin/nemesis
-    printf 'host' > $M/data/property/persist.sys.usb.config; printf 'host' > $M/props/persist.sys.usb.config
-    : > $M/proc/net/tcp
-    cp $M/system/build.prop "$W/stock.bp"; cp $M/$HIDE "$W/stock.hide"
+stock() {   # a head unit as it ships: ADB off; a runner with nothing recorded
+    [ -d "$M" ] && chmod -R u+w "$M"
+    rm -rf "$M" "$KT_JOURNAL" "$W/data"
+    : >"$KT_LOG"
+    mkdir -p "$M/system/etc/permissions" "$M/data/property" "$M/data/nemesis/backup" "$M/props" "$M/proc/net" "$W/data"
+    cp "$W/stock.bp" "$M/system/build.prop"
+    cp "$W/stock.hide" "$M/$HIDE"
+    printf 'host' >"$M/data/property/persist.sys.usb.config"
+    printf 'host' >"$M/props/persist.sys.usb.config"
+    : >"$M/proc/net/tcp"
+    ro
 }
+ro() { find "$M/system" -type d -exec chmod a-w {} +; }
+rw() { find "$M/system" -type d -exec chmod u+w {} +; }
 # the car as adb.tcp (and then HMG Leafia Plus, detached) left it, with ADB running
 adbtcp_car() {
     stock
+    rw
     A=$M/data/nemesis/backup/adb.tcp
-    mkdir -p $A $M/data/nemesis/backup/leafia-detached
-    cp $M/system/build.prop $A/build.prop
-    for k in ro.adb.secure $EN service.adb.tcp.port; do echo absent > $A/bp.$k.absent; done
-    echo unset > $A/gp.$EN.unset; echo unset > $A/gp.service.adb.tcp.port.unset
-    cp $M/$HIDE $A/adb_hide.xml; echo 1 > $A/saved
-    printf 'ro.adb.secure=0\npersist.service.adb.tcp.enable=1\nservice.adb.tcp.port=5555\n' >> $M/system/build.prop
-    rm $M/$HIDE
-    printf 'enable\nport\n' > $M/data/nemesis/backup/leafia-detached/wireless.carplay.aa.adb
-    printf 1 > $M/data/property/$EN; printf 5555 > $M/data/property/$PORT
-    printf 1 > $M/props/$EN; printf 5555 > $M/props/$PORT; printf 5555 > $M/props/service.adb.tcp.port
-    "$W/stubs/listen"
+    mkdir -p "$A" "$M/data/nemesis/backup/leafia-detached"
+    cp "$M/system/build.prop" "$A/build.prop"
+    for k in ro.adb.secure $EN service.adb.tcp.port; do echo absent >"$A/bp.$k.absent"; done
+    echo unset >"$A/gp.$EN.unset"
+    echo unset >"$A/gp.service.adb.tcp.port.unset"
+    cp "$M/$HIDE" "$A/adb_hide.xml"
+    echo 1 >"$A/saved"
+    printf 'ro.adb.secure=0\npersist.service.adb.tcp.enable=1\nservice.adb.tcp.port=5555\n' >>"$M/system/build.prop"
+    rm "$M/$HIDE"
+    ro
+    printf 'enable\nport\n' >"$M/data/nemesis/backup/leafia-detached/wireless.carplay.aa.adb"
+    printf 1 >"$M/data/property/$EN"
+    printf 5555 >"$M/data/property/$PORT"
+    printf 1 >"$M/props/$EN"
+    printf 5555 >"$M/props/$PORT"
+    printf 5555 >"$M/props/service.adb.tcp.port"
+    "$W/priv/listen"
 }
 # a head unit start: runtime props from build.prop then /data/property; adbd per init's trigger
 restart() {
-    rm -rf $M/props; mkdir -p $M/props; : > $M/proc/net/tcp
-    while IFS= read -r l; do case "$l" in *=*) printf '%s' "${l#*=}" > "$M/props/${l%%=*}" ;; esac; done < $M/system/build.prop
-    for f in $M/data/property/*; do [ -f "$f" ] && cp "$f" "$M/props/${f##*/}"; done
-    [ "$(cat $M/props/$EN 2>/dev/null)" = 1 ] && "$W/stubs/listen"
-    : > $M/setprop.log; : > $M/adbd.log
+    rm -rf "$M/props"
+    mkdir -p "$M/props"
+    : >"$M/proc/net/tcp"
+    while IFS= read -r l; do case "$l" in *=*) printf '%s' "${l#*=}" >"$M/props/${l%%=*}" ;; esac; done <"$M/system/build.prop"
+    for f in "$M"/data/property/*; do if [ -f "$f" ]; then cp "$f" "$M/props/${f##*/}"; fi; done
+    if [ "$(cat "$M/props/$EN" 2>/dev/null)" = 1 ]; then "$W/priv/listen"; fi
+    : >"$M/setprop.log"
+    : >"$M/adbd.log"
 }
-tree() { (cd "$M" && find system data -type f ! -name nemesis | sort | while read -r f; do echo "$(md5of "$f") $f"; done; for p in $EN $PORT; do echo "now $p=[$(cat props/$p 2>/dev/null)]"; done); }
-md5of() { if command -v md5sum >/dev/null; then md5sum "$1" | cut -d' ' -f1; else md5 -q "$1"; fi; }
+tree() {
+    (cd "$M" && find system data -type f | sort | while read -r f; do echo "$(md5of "$f") $f"; done
+     for p in $EN $PORT; do echo "now $p=[$(cat "props/$p" 2>/dev/null)]"; done)
+}
 
 ok() { echo "  ok: $1"; }
-bad() { echo "  FAILED: $1"; FAILS=$((FAILS + 1)); }
-st() { "$SH" $T/status.sh; }
-expect() { local s; s=$(st); case "$s" in "$1") ok "status: $s" ;; *) bad "status: $s (want $1)" ;; esac; }
-run() {   # <enable|disable> [fail]
-    if "$SH" $T/$1.sh > "$W/log" 2>&1; then
-        [ "$2" = fail ] && { bad "$1 should have failed"; cat "$W/log"; } || ok "$1: $(cat "$W/log" | tr '\n' ' ')"
+bad() {
+    echo "  FAILED: $1"
+    FAILS=$((FAILS + 1))
+}
+as() {
+    mkdir -p "$W/data/adb-wifi"
+    TWEAK_ID=adb-wifi TWEAK_DIR=$T TWEAK_DATA=$W/data/adb-wifi "$@"
+}
+st() { as "$SH" "$T/status.sh"; }
+expect() {
+    s=$(st)
+    if [ "$s" = "$1" ]; then ok "status: $s"; else bad "status: $s (want $1)"; fi
+}
+on() {   # [fail]
+    if as "$SH" "$T/enable.sh" >"$W/log" 2>&1; then
+        if [ "$1" = fail ]; then
+            bad "on should have failed"
+            cat "$W/log"
+        else
+            ok "on: $(tr '\n' ' ' <"$W/log")"
+        fi
+    elif [ "$1" = fail ]; then
+        ok "on refused: $(tr '\n' ' ' <"$W/log")"
     else
-        [ "$2" = fail ] && ok "$1 refused: $(cat "$W/log" | tr '\n' ' ')" || { bad "$1"; cat "$W/log"; }
+        bad "on"
+        cat "$W/log"
     fi
 }
-no_restart() { [ -s $M/adbd.log ] && bad "adbd was restarted (a running ADB session would drop)" || ok "adbd not restarted"; }
-no_setprop() { [ -s $M/setprop.log ] && { bad "setprop was called: $(cat $M/setprop.log | tr '\n' ' ')"; } || ok "no setprop"; }
-same() { cmp -s "$1" "$2" && ok "$3" || { bad "$3"; diff "$1" "$2" || true; }; }
-absent() { [ ! -e "$M/$1" ] && ok "$1 absent" || bad "$1 is there"; }
-is_stock_files() {
-    same "$W/stock.bp" $M/system/build.prop "build.prop is stock, byte for byte"
-    same "$W/stock.hide" $M/$HIDE "adb_hide.xml is back, byte for byte"
-    absent data/property/$EN; absent data/property/$PORT
-    absent data/nemesis/backup/tweaks.adb/adb-wifi
+off() {   # the runner replays the journal
+    as kt --off adb-wifi
+    ok "off"
 }
+no_restart() { if [ -s "$M/adbd.log" ]; then bad "adbd was restarted (a running ADB session would drop)"; else ok "adbd not restarted"; fi; }
+no_setprop() { if [ -s "$M/setprop.log" ]; then bad "setprop was called: $(tr '\n' ' ' <"$M/setprop.log")"; else ok "no setprop"; fi; }
+same() {
+    if cmp -s "$1" "$2"; then ok "$3"; else
+        bad "$3"
+        diff "$1" "$2" || true
+    fi
+}
+absent() { if [ ! -e "$M/$1" ]; then ok "$1 absent"; else bad "$1 is there"; fi; }
+is_stock_files() {
+    same "$W/stock.bp" "$M/system/build.prop" "build.prop is stock, byte for byte"
+    same "$W/stock.hide" "$M/$HIDE" "adb_hide.xml is stock, byte for byte"
+    absent "data/property/$EN"
+    absent "data/property/$PORT"
+}
+declared() { if grep DENIED "$KT_LOG"; then bad "kt calls outside the needs"; else ok "every kt call was declared"; fi; }
 
 echo "A. stock car: on, off, on, off"
-stock; restart; expect "off"
-run enable; expect "on ADB over Wi-Fi is on"
-[ "$(cat $M/data/property/$EN)" = 1 ] && [ "$(cat $M/data/property/$PORT)" = 5555 ] && ok "props saved without a newline" || bad "saved props"
-absent $HIDE
-same "$W/stock.bp" $M/system/build.prop "build.prop untouched"
-: > $M/setprop.log; : > $M/adbd.log
-run enable; no_setprop; no_restart
-run disable; expect "off ADB stays on until the next restart"
-grep -x "$EN=0" $M/setprop.log >/dev/null && ok "switch set to 0, as Engineering Mode does" || bad "switch not set to 0"
-is_stock_files
-restart; expect "off"
-run enable; expect "on ADB over Wi-Fi is on"
-restart; expect "on ADB over Wi-Fi is on"
-run disable; restart; expect "off"; is_stock_files
-run disable
-
-echo "B. the car as adb.tcp left it: reads on, installing runs nothing, take-over, off, on, off"
-adbtcp_car; : > $M/setprop.log; : > $M/adbd.log
+stock
+restart
+expect "off"
+on
 expect "on ADB over Wi-Fi is on"
-tree > "$W/before"
-"$SH" $HERE/package/lib/adb-adopt.sh > "$W/log" 2>&1 && ok "adb-adopt.sh" || { bad "adb-adopt.sh"; cat "$W/log"; }
-[ -f $M/data/nemesis/backup/tweaks.adb/adb-wifi/$PORT.unset ] && ok "port was unset before Leafia" || bad "port record"
-run enable; no_setprop; no_restart
-tree | grep -v 'backup/tweaks.adb' > "$W/after"; grep -v 'backup/tweaks.adb' "$W/before" | diff - "$W/after" > /dev/null && ok "nothing else changed" || { bad "files changed"; diff "$W/before" "$W/after"; }
-run disable; no_restart; expect "off ADB stays on until the next restart"
+if [ "$(cat "$M/data/property/$EN")" = 1 ] && [ "$(cat "$M/data/property/$PORT")" = 5555 ]; then ok "props saved"; else bad "saved props"; fi
+same "$P/tweaks/adb-wifi/adb_hide.shown.xml" "$M/$HIDE" "adb_hide.xml has no feature: the switch shows"
+same "$W/stock.bp" "$M/system/build.prop" "build.prop untouched"
+: >"$M/setprop.log"
+: >"$M/adbd.log"
+on
+no_setprop
+no_restart
+off
+expect "off ADB stays on until the next restart"
+if [ "$(cat "$M/props/$EN" 2>/dev/null)" != 1 ]; then ok "Engineering Mode's switch shows off"; else bad "switch still 1"; fi
 is_stock_files
-restart; expect "off"
-run enable; expect "on ADB over Wi-Fi is on"; restart; expect "on ADB over Wi-Fi is on"
-run disable; restart; expect "off"; is_stock_files
+restart
+expect "off"
+on
+expect "on ADB over Wi-Fi is on"
+restart
+expect "on ADB over Wi-Fi is on"
+off
+restart
+expect "off"
+is_stock_files
+declared
 
-echo "B2. adb.tcp's setup turned off without the take-over step (backup read at once)"
+echo "B. the car as adb.tcp left it: reads on, taken over without a change, off, on, off"
 adbtcp_car
-run disable; is_stock_files
+: >"$M/setprop.log"
+: >"$M/adbd.log"
+expect "on ADB over Wi-Fi is on"
+tree >"$W/before"
+on
+no_setprop
+no_restart
+tree >"$W/after"
+if diff "$W/before" "$W/after" >/dev/null; then ok "nothing changed"; else
+    bad "files changed"
+    diff "$W/before" "$W/after" || true
+fi
+off
+no_restart
+expect "off ADB stays on until the next restart"
+is_stock_files
+restart
+expect "off"
+on
+expect "on ADB over Wi-Fi is on"
+restart
+expect "on ADB over Wi-Fi is on"
+off
+restart
+expect "off"
+is_stock_files
+declared
 
 echo "C. Engineering Mode's switch shows up in the status"
-stock; restart; run enable
-"$W/stubs/setprop" $EN 0; : > $M/proc/net/tcp    # Engineering Mode off: setprop 0, stop adbd
+stock
+restart
+on
+"$W/priv/setprop" $EN 0
+: >"$M/proc/net/tcp" # Engineering Mode off: setprop 0, stop adbd
 expect "off"
-"$W/stubs/setprop" $EN 1              # Engineering Mode on
+"$W/priv/setprop" $EN 1 # Engineering Mode on
 expect "on ADB over Wi-Fi is on"
 
-echo "D. after adb.tcp's own undo (switch still 1 until the restart, its file gone, files stock): repaired without restarting adbd"
-adbtcp_car; rm $M/data/property/$EN; cp "$W/stock.bp" $M/system/build.prop; cp "$W/stock.hide" $M/$HIDE; : > $M/setprop.log; : > $M/adbd.log
-expect "off ADB stays on until the next restart"
-run enable; no_setprop; no_restart; expect "on ADB over Wi-Fi is on"
+echo "D. turned on in Engineering Mode first: taken over without restarting adbd; off sets the switch to 0"
+stock
+restart
+"$W/priv/setprop" $EN 1
+: >"$M/setprop.log"
+: >"$M/adbd.log"
+on
+no_restart
+expect "on ADB over Wi-Fi is on"
+off
+if [ "$(cat "$M/props/$EN")" = 0 ]; then ok "switch back to 0, as Engineering Mode's own switch does"; else bad "switch is $(cat "$M/props/$EN")"; fi
+no_restart
+declared
 
 echo "E. states it doesn't know are left alone"
-adbtcp_car; echo "ro.something=else" >> $M/system/build.prop; tree > "$W/before"
-run disable fail; tree | grep -v 'backup/tweaks.adb' > "$W/after"; grep -v 'backup/tweaks.adb' "$W/before" | diff - "$W/after" >/dev/null && ok "nothing changed" || bad "changed"
-expect "on ADB over Wi-Fi is on"
-adbtcp_car; rm $M/data/nemesis/backup/adb.tcp/bp.ro.adb.secure.absent; printf 'ro.adb.secure=1\n' > $M/data/nemesis/backup/adb.tcp/bp.ro.adb.secure.line
-run disable fail
-adbtcp_car; rm -rf $M/data/nemesis/backup/adb.tcp
-run disable fail; expect "on ADB over Wi-Fi is on"
-stock; restart; printf 'persist.service.adb.tcp.enable=1\n' >> $M/system/build.prop; printf 0 > $M/data/property/$EN; printf 0 > $M/props/$EN
-run enable fail; absent data/nemesis/backup/tweaks.adb/adb-wifi
-stock; restart; chmod 000 $M/data/property; expect "error can't read the saved settings"; chmod 700 $M/data/property
+adbtcp_car
+rw
+echo "ro.something=else" >>"$M/system/build.prop"
+ro
+tree >"$W/before"
+on fail
+tree >"$W/after"
+if diff "$W/before" "$W/after" >/dev/null; then ok "nothing changed"; else bad "changed"; fi
+adbtcp_car
+rm "$M/data/nemesis/backup/adb.tcp/bp.ro.adb.secure.absent"
+printf 'ro.adb.secure=1\n' >"$M/data/nemesis/backup/adb.tcp/bp.ro.adb.secure.line"
+on fail
+stock
+restart
+rw
+printf 'persist.service.adb.tcp.enable=1\n' >>"$M/system/build.prop"
+ro
+on fail
+declared
 
 echo "F. on again after off, with adb.tcp's old backup still there"
-adbtcp_car; run disable; expect "off ADB stays on until the next restart"; restart
-run enable; expect "on ADB over Wi-Fi is on"
-run disable; is_stock_files
+adbtcp_car
+on
+off
+expect "off ADB stays on until the next restart"
+restart
+on
+expect "on ADB over Wi-Fi is on"
+off
+is_stock_files
+declared
 
-[ $FAILS = 0 ] && echo "all passed ($SH)" || { echo "$FAILS failed ($SH)"; exit 1; }
+if [ $FAILS = 0 ]; then echo "all passed ($SH)"; else
+    echo "$FAILS failed ($SH)"
+    exit 1
+fi
