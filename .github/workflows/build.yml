@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        run: |
+          VERSION=$(sed -n 's/^version=//p' package/NEMESIS.data)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match package/NEMESIS.data version $VERSION"
+            exit 1
+          fi
+
+      - name: Shell syntax
+        run: for f in $(find package tests -name '*.sh') build.sh; do sh -n "$f" || exit 1; done
+
+      # the head unit's shell is mksh; dash is the closest stand-in that is always there
+      - name: mksh
+        run: sudo apt-get install -y -qq mksh > /dev/null
+
+      - name: Host test
+        run: |
+          KT_SH=mksh sh tests/host-test.sh
+          KT_SH=dash sh tests/host-test.sh
+          KT_SH=bash sh tests/host-test.sh
+
+      - name: Build
+        run: |
+          sh build.sh
+          mv dist/tweaks.adb.zip "dist/tweaks.adb-v$VERSION.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tweaks.adb-v${{ env.VERSION }}
+          path: dist/*.zip
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          NEMESIS package \`tweaks.adb\` $VERSION, a tweak pack for kia-tweaks (needs kia.tweaks 1.2 or newer):
+          install \`tweaks.adb-v$VERSION.zip\` with NEMESIS (\`nemesis install --update <zip>\` over ADB).
+          Moving from the community package adb.tcp ("TCP ADB"): see docs/migration.md.
+          ADB over Wi-Fi has no authentication on this firmware: anyone who joins the car's Wi-Fi can control the head unit.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "tweaks-adb $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
