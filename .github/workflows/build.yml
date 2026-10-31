@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Version
         run: |
@@ -31,13 +33,6 @@ jobs:
       - name: Tweaks
         run: sh tools/check-tweaks.sh package
 
-      # the pinned lint tools and settings of the Cabinwright repos
-      - uses: actions/checkout@v4
-        with:
-          repository: cabinwright/menu
-          ref: v1.0
-          path: menu
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -46,13 +41,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/cabinwright-tools
-          key: cabinwright-tools-${{ runner.os }}-${{ hashFiles('menu/api/tools/fetch-tools.sh') }}
+          key: cabinwright-tools-${{ runner.os }}-${{ hashFiles('sdk/api/tools/fetch-tools.sh') }}
 
       # ShellCheck, the tweak's scripts as the car's mksh
       - name: Lint
         run: |
-          sh menu/api/tools/fetch-tools.sh
-          sh menu/api/tools/lint.sh .
+          sh sdk/api/tools/fetch-tools.sh
+          sh sdk/api/tools/lint.sh .
 
       # The head unit's shell is mksh; dash is the closest stand-in that is always there
       - name: mksh

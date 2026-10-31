@@ -100,7 +100,7 @@ sh tests/host-test.sh                # KT_SH=mksh|dash|bash picks the shell for 
 sh tests/detach-test.sh <adb.tcp>    # a copy of /data/nemesis/apps/adb.tcp (not included)
 ```
 
-CI also lints with the Cabinwright menu repo's `api/tools/lint.sh` (ShellCheck), pinned at
+CI also lints with the [Cabinwright SDK](https://github.com/cabinwright/sdk)'s `api/tools/lint.sh` (ShellCheck), pinned at
 `v1.0`.
 
 ## License
