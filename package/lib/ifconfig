@@ -1,0 +1,12 @@
+#!/system/bin/sh
+# tweaks.adb, tweak adb-wifi: stands in for the stock /system/bin/ifconfig, a link
+# to toolbox. init's set_adb_ip service (init.daudio.rc; started when
+# persist.service.adb.tcp.enable=1, the "ADB TCP" switch, or persist.sys.swverify=mat) runs
+# exactly "ifconfig eth0 192.168.0.123", which gives eth0 a /24 inside the projection hotspot's
+# 192.168.0.0/24: replies to phones then leave through eth0 and wireless Android Auto and
+# CarPlay never connect. That one call gets a /32 netmask here (same address, so ADB over the
+# network still works); every other call goes to toolbox unchanged.
+if [ $# = 2 ] && [ "$1" = eth0 ] && [ "$2" = 192.168.0.123 ]; then
+    exec /system/bin/toolbox ifconfig eth0 192.168.0.123 netmask 255.255.255.255
+fi
+exec /system/bin/toolbox ifconfig "$@"
