@@ -26,7 +26,8 @@ you agree) and made through the store's `kt`; the store's runner records what wa
 and puts it back when the tweak is turned off.
 
 - **On**:
-  - sets `persist.adb.tcp.port=5555` if it has no value;
+  - sets and saves `persist.adb.tcp.port=5555`;
+  - replaces the `/system/bin/ifconfig` link with `lib/ifconfig` (see eth0 below);
   - replaces `/system/etc/permissions/com.hkmc.software.engineermode.adb_hide.xml` with a copy
     that declares no feature, which shows Engineering Mode's ADB switch from the next start on,
     so ADB can be turned back on from the screen;
@@ -71,8 +72,9 @@ These findings come from the car's init scripts, `/sbin/adbd`, and the Engineeri
   `persist.adb.tcp.port` holds a port. `set_adb_port` can lose the race with `adbd`, so the
   tweak sets `persist.adb.tcp.port` as well.
 - **eth0.** `set_adb_ip` runs `ifconfig eth0 192.168.0.123` (a /24) at every start. That clashes
-  with the wireless projection hotspot, so keep **ADB TCP and wireless projection together**
-  (`adb-tcp-hotspot`, in tweaks-projection) on.
+  with the wireless projection hotspot, so the tweak replaces the `ifconfig -> toolbox` link with
+  a short script that gives exactly that call a /32 netmask and passes everything else to
+  `toolbox`. If eth0 already has the /24 it runs `set_adb_ip` again, so this works at once.
 - **No authentication.** This `adbd` never asks for a key. It doesn't read `ro.adb.secure`
   (`default.prop` sets it to 1, and `adb.tcp`'s `ro.adb.secure=0` line in `build.prop` can't
   change a read-only prop anyway), and it never reads `adb_keys`. "Only approved computers"

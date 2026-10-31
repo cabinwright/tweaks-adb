@@ -43,8 +43,6 @@ detach adb.tcp instead.
 
 **0. Prerequisites.**
 - cabinwright.store 1.0 or newer installed.
-- Keep **ADB TCP and wireless projection together** (tweaks-projection's `adb-tcp-hotspot`) on.
-  The switch has to stay 1 (see the README), so `set_adb_ip` still runs at every start.
 
 **1. Install the pack** from the store. It has no install hooks, so nothing changes. The store
 lists the tweak's needs before you agree.

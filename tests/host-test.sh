@@ -80,6 +80,10 @@ stock() {   # a head unit as it ships: ADB off; a runner with nothing recorded
     mkdir -p "$M/system/etc/permissions" "$M/data/property" "$M/data/nemesis/backup" "$M/props" "$M/proc/net" "$W/data"
     cp "$W/stock.bp" "$M/system/build.prop"
     cp "$W/stock.hide" "$M/$HIDE"
+    mkdir -p "$M/system/bin"
+    printf '#!/bin/sh\necho "toolbox $*" >> %s/toolbox.log\n' "$M" >"$M/system/bin/toolbox"
+    chmod 755 "$M/system/bin/toolbox"
+    ln -s toolbox "$M/system/bin/ifconfig"
     printf 'host' >"$M/data/property/persist.sys.usb.config"
     printf 'host' >"$M/props/persist.sys.usb.config"
     : >"$M/proc/net/tcp"
@@ -122,7 +126,7 @@ restart() {
     : >"$M/adbd.log"
 }
 tree() {
-    (cd "$M" && find system data -type f | sort | while read -r f; do echo "$(md5of "$f") $f"; done
+    (cd "$M" && find system data -type f ! -path system/bin/ifconfig | sort | while read -r f; do echo "$(md5of "$f") $f"; done
      for p in $EN $PORT; do echo "now $p=[$(cat "props/$p" 2>/dev/null)]"; done)
 }
 
@@ -160,7 +164,10 @@ off() {   # the runner replays the journal
     ok "off"
 }
 no_restart() { if [ -s "$M/adbd.log" ]; then bad "adbd was restarted (a running ADB session would drop)"; else ok "adbd not restarted"; fi; }
-no_setprop() { if [ -s "$M/setprop.log" ]; then bad "setprop was called: $(tr '\n' ' ' <"$M/setprop.log")"; else ok "no setprop"; fi; }
+# saving the port (enable.sh) sets the value it already has: nothing else may be set
+no_setprop() {
+    if grep -qv "^$PORT=5555\$" "$M/setprop.log" 2>/dev/null; then bad "setprop was called: $(tr '\n' ' ' <"$M/setprop.log")"; else ok "no setprop but the saved port"; fi
+}
 same() {
     if cmp -s "$1" "$2"; then ok "$3"; else
         bad "$3"
@@ -291,6 +298,40 @@ on
 expect "on ADB over Wi-Fi is on"
 off
 is_stock_files
+declared
+
+echo "the ifconfig wrapper: ADB and wireless projection together"
+stock
+printf '#!/bin/sh\necho "eth0     UP    192.168.0.123/24  0x00001043 0a:d0:0d:00:0b:ad"\n' >"$W/stubs/netcfg"
+chmod 755 "$W/stubs/netcfg"
+on
+if [ ! -h "$M/system/bin/ifconfig" ] && cmp -s "$M/system/bin/ifconfig" "$HERE/package/lib/ifconfig" && [ -x "$M/system/bin/ifconfig" ]; then
+    ok "wrapper installed, executable"
+else
+    bad "wrapper not installed"
+fi
+if grep -qx 'adb-wifi service start set_adb_ip' "$KT_LOG"; then ok "stock set_adb_ip re-run through the wrapper"; else bad "set_adb_ip not re-run"; fi
+# the wrapper itself: only the stock call changes
+sed "s#/system/bin/toolbox#$M/system/bin/toolbox#" "$HERE/package/lib/ifconfig" >"$W/ifc"
+: >"$M/toolbox.log"
+sh "$W/ifc" eth0 192.168.0.123
+sh "$W/ifc" usb0 up
+sh "$W/ifc" eth0 192.168.0.123 netmask 255.255.255.255
+if printf 'toolbox ifconfig eth0 192.168.0.123 netmask 255.255.255.255\ntoolbox ifconfig usb0 up\ntoolbox ifconfig eth0 192.168.0.123 netmask 255.255.255.255\n' | diff - "$M/toolbox.log" >/dev/null; then
+    ok "wrapper: /32 for set_adb_ip's call, everything else unchanged"
+else
+    bad "wrapper calls"
+fi
+off
+if [ -h "$M/system/bin/ifconfig" ] && [ "$(readlink "$M/system/bin/ifconfig")" = toolbox ]; then ok "toolbox link back"; else bad "link not restored"; fi
+rm -f "$W/stubs/netcfg"
+declared
+
+echo "the port is saved even when this boot already has it"
+stock
+printf 5555 >"$M/props/$PORT"
+on
+if [ "$(cat "$M/data/property/$PORT" 2>/dev/null)" = 5555 ]; then ok "saved for the next start"; else bad "port not saved"; fi
 declared
 
 if [ $FAILS = 0 ]; then echo "all passed ($SH)"; else

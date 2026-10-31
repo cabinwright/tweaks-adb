@@ -14,6 +14,10 @@
 #   same through MiscService.setSystem: on = setprop persist.service.adb.tcp.enable 1; off =
 #   setprop ... 0 and "stop adbd". Its screen shows on when getprop says "1". So "on" here is
 #   that prop being 1, and kt prop set does what the switch does; no binder call is needed.
+# - set_adb_ip runs "ifconfig eth0 192.168.0.123", a /24 inside the projection hotspot's
+#   192.168.0.0/24: replies to phones would leave through eth0. lib/ifconfig, in place of the
+#   ifconfig -> toolbox link, makes that one call a /32, so ADB and wireless projection work
+#   together. An address already given this boot is narrowed by running set_adb_ip again.
 # - ro.adb.secure is ignored: default.prop sets it first (ro.* can't change) and this adbd
 #   never reads it or checks keys. So this tweak doesn't touch it.
 #
@@ -27,6 +31,8 @@ NET=$R/proc/net/tcp
 EN=persist.service.adb.tcp.enable
 PORT=persist.adb.tcp.port
 SUM_HIDE=bb94dd63efd6d3494834e649653f795f   # adb_hide.xml as this firmware ships it
+IFC=/system/bin/ifconfig
+SUM_IFC=41cd6ec48b1606dfdaeb62640015d408   # lib/ifconfig
 # the lines adb.tcp appended to build.prop
 ADBTCP_LINES='^(ro\.adb\.secure|persist\.service\.adb\.tcp\.enable|service\.adb\.tcp\.port)='
 
@@ -48,18 +54,34 @@ listening() { grep ' 00000000:15B3 00000000:0000 0A ' "$NET" >/dev/null 2>&1; }
 bp_has_lines() { grep -E "$ADBTCP_LINES" "$R$BP" >/dev/null 2>&1; }
 # Engineering Mode's ADB switch is hidden: the feature file as it ships
 is_hidden() { [ "$(sum "$R$HIDE")" = $SUM_HIDE ]; }
+# ifconfig is the stock link to toolbox
+ifc_stock() {
+    local l
+    [ -h "$R$IFC" ] || return 1
+    l=$(ls -l "$R$IFC")
+    case "$l" in *"-> toolbox") return 0 ;; esac
+    return 1
+}
+ifc_ours() { [ ! -h "$R$IFC" ] && [ "$(sum "$R$IFC")" = $SUM_IFC ]; }
+# eth0 has the stock ADB address as a /24 right now
+eth0_clashes() {
+    netcfg 2>/dev/null | while read -r i _ a _; do
+        [ "$i" = eth0 ] && [ "$a" = 192.168.0.123/24 ] && echo y
+    done
+}
 
 # the plan: what to do, gathered first so that a check that fails changes nothing
 STEPS=
-step() { STEPS="$STEPS $1:$2:$3"; }   # <put|adopt|prop|propadopt> <file or prop> <file or value>
+step() { STEPS="$STEPS $1:$2:$3"; }   # <put|exe|adopt|prop|port|propadopt> <file or prop> <file or value>
 run_steps() {
     local s v n f
     for s in $STEPS; do
         v=${s%%:*}; s=${s#*:}; n=${s%%:*}; f=${s#*:}
         case $v in
             put) kt file replace "$n" "$f" || return 1 ;;
+            exe) kt file replace "$n" "$f" 0755 || return 1 ;;
             adopt) kt file adopt "$n" "$f" || return 1 ;;
-            prop) kt prop set "$n" "$f" || return 1 ;;
+            prop | port) kt prop set "$n" "$f" || return 1 ;;
             propadopt) kt prop adopt "$n" "$f" || return 1 ;;
         esac
     done
